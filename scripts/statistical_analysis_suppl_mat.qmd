@@ -1,21 +1,19 @@
 ---
 title: Statistical analysis
-subtitle: Chronic stress raises baseline circulating corticosterone and reduces vocal plasticity in male budgerigars, an avian model for adult vocal learning
-author: <a href="http://marceloarayasalas.weebly.com/">Marcelo Araya-Salas, PhD</a> & <a href="https://wrightbehaviorlab.org/">Timothy Wright, PhD</a>
+subtitle: Chronic stress raises and vocal plasticity in budgerigars
+author: <a href="marce10.github.io">Marcelo Araya-Salas, PhD</a> & <a href="https://wrightbehaviorlab.org/">Timothy Wright, PhD</a>
 date: "`r Sys.Date()`"
-output:
-  html_document:
-    code_folding: hide
-    toc: yes
-    toc_depth: 3
+toc: true
+toc-depth: 2
+toc-location: left
+number-sections: true
+highlight-style: pygments
+format:
+  html:
+    df-print: kable
+    code-fold: show
+    code-tools: true
     css: qmd.css
-    df_print: kable
-    toc_float:
-      collapsed: yes
-      smooth_scroll: yes
-fontsize: 12pt 
-editor_options: 
-  chunk_output_type: console
 ---
 <style>
 body
@@ -49,7 +47,7 @@ if (file.exists("./.git/config")){
   config <- readLines("./.git/config")
   url <- grep("url",  config, value = TRUE)
   url <- gsub("\\turl = |.git$", "", url)
-  cat("\nWe recomend cloning the following github repository to be able to reproduce all the analyses: [", url, "](", url, ")", sep = "")
+  cat("\nAll data and source code is also found at: [", url, "](", url, ")", sep = "")
   }
 
 ```

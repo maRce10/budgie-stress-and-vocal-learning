@@ -21,8 +21,13 @@ budgerigars, an avian model for adult vocal learning.***
 
 ## General info
 
-- Evaluated the physiological and behavioral response to stress related
+- Evaluated the effect of stress on physiological and behavioral related
   to vocal learning in budgerigars.
+
+## Analysis
+
+- [Statistical
+  analysis](https://rpubs.com/marcelo-araya-salas/stress_vocal_learning)
 
 ## Status
 
