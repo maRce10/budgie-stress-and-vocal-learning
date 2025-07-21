@@ -1,0 +1,1566 @@
+---
+title: Statistical analysis
+subtitle: Chronic stress raises baseline circulating corticosterone and reduces vocal plasticity in male budgerigars, an avian model for adult vocal learning
+author: <a href="http://marceloarayasalas.weebly.com/">Marcelo Araya-Salas, PhD</a> & <a href="https://wrightbehaviorlab.org/">Timothy Wright, PhD</a>
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 3
+    css: qmd.css
+    df_print: kable
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+fontsize: 12pt 
+editor_options: 
+  chunk_output_type: console
+---
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
+
+```{r, echo = FALSE}
+# set working directory as project directory or one directory above,
+rootdir <- try(rprojroot::find_rstudio_root_file(), silent = TRUE)
+if (is(rootdir, "try-error")) rootdir <-  ".."
+knitr::opts_knit$set(root.dir = rootdir)
+```
+
+
+<!-- skyblue box -->
+<div class="alert alert-info">
+
+# Data analysis for the paper {.unnumbered .unlisted}
+
+Timothy F. Wright, Marcelo Araya-Salas, Alondra Villalba, Amelia M.-F. Clayshulte Abraham, Carlos I. Campos, Amanda L. Schmidt, Connor Draney, Jodie M. Jawor. *In review*. ***Chronic stress raises baseline circulating corticosterone and reduces vocal plasticity in male budgerigars, an avian model for adult vocal learning.***
+
+</div>
+
+```{r add link to github repo if any, echo = FALSE, results='asis'}
+
+# print link to github repo if any
+if (file.exists("./.git/config")){
+  config <- readLines("./.git/config")
+  url <- grep("url",  config, value = TRUE)
+  url <- gsub("\\turl = |.git$", "", url)
+  cat("\nWe recomend cloning the following github repository to be able to reproduce all the analyses: [", url, "](", url, ")", sep = "")
+  }
+
+```
+
+```{r setup style, echo = FALSE, message = FALSE, warning=FALSE}
+
+# options to customize chunk outputs
+knitr::opts_chunk$set(
+  class.source = "numberLines lineAnchors", # for code line numbers
+  tidy.opts = list(width.cutoff = 65), 
+  tidy = TRUE,
+  message = FALSE
+ )
+
+```
+
+&nbsp;
+
+## Load packages
+```{r packages, message = FALSE, warning = FALSE, echo = TRUE, eval = TRUE}
+
+# install "sketchy" if not install yet
+if (!requireNamespace("sketchy", quietly = TRUE)) {
+    install.packages("sketchy")
+}
+
+## add 'developer' to packages to be installed from github
+x <- c(
+    "remotes",
+    "readxl",
+    "pbapply",
+    "viridis",
+    "ggplot2",
+    "kableExtra",
+    "knitr",
+    "formatR",
+    "MASS",
+    "brms",
+    "lme4",
+    "cowplot",
+    "maRce10/PhenotypeSpace",
+    "maRce10/brmsish"
+    )
+
+sketchy::load_packages(x)
+
+
+# funnction to print tables in html format 
+print_kable <- function(x) {
+    kb <- kable(x, row.names = TRUE, digits = 4, "html")
+    kb <- kable_styling(kb,
+                        bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+    scroll_box(kb, width = "100%")
+}
+
+```
+
+## Functions and global parameters
+```{r functions and parameters, eval = TRUE, echo = TRUE}
+opts_knit$set(root.dir = "..")
+
+# set evaluation false
+opts_chunk$set(
+    fig.width = 10,
+    fig.height = 6,
+    warning = FALSE,
+    message = FALSE,
+    tidy = TRUE
+)
+
+read_excel_df <- function(...)
+    data.frame(read_excel(...))
+
+
+# for reading months in english format
+sl <- Sys.setlocale(locale = "en_US.UTF-8")
+
+
+standard_error <- function(x)
+    sd(x) / sqrt(length(x))
+
+cols <- viridis(10, alpha = 0.7)
+
+col_pointrange <- cols[7]
+```
+
+Modify these paths to point to the data directories
+```{r paths, eval = TRUE, echo = TRUE}
+
+raw_data_path <- "./data/raw/"
+processed_data_path <- "./data/processed/"
+output_path <- "./output"
+
+```
+
+```{r read detections and prepare data, eval = TRUE}
+
+# read ext sel tab calls
+sels <- read.csv(file.path(raw_data_path, "acoustic_features_budgie_calls.csv"))
+
+# keep only spectrographic parameters
+sels <- sels[, c(
+    "sound.files",
+    "selec",
+    "duration",
+    "meanfreq",
+    "sd",
+    "freq.median",
+    "freq.IQR",
+    "time.IQR",
+    "skew",
+    "kurt",
+    "sp.ent",
+    "time.ent",
+    "entropy",
+    "meandom",
+    "mindom",
+    "maxdom",
+    "dfrange",
+    "modindx",
+    "meanpeakf"
+)]
+
+sels$ID <- sapply(sels$sound.files, function(x)
+    strsplit(x, "_")[[1]][1])
+sels$month <- sapply(sels$sound.files, function(x)
+    strsplit(x, "_")[[1]][2])
+sels$day <- sapply(sels$sound.files, function(x)
+    strsplit(x, "_")[[1]][3])
+sels$year <- sapply(sels$sound.files, function(x)
+    strsplit(x, "_")[[1]][4])
+
+sels$date <- paste(sels$day, substr(sels$month, 0, 3), sels$year, sep = "-")
+
+sels$date <- as.Date(sels$date, format = "%d-%b-%Y")
+
+# acoustic measurements
+areas_by_week <- read.csv(file.path(processed_data_path, "acoustic_space_area_by_id_and_week.csv"))
+
+
+indiv_ovlp <- read.csv(
+    file.path(processed_data_path,
+              "acoustic_space_density_overlap_to_first_week_by_id.csv"))
+
+indiv_ovlp$treatment <- factor(indiv_ovlp$treatment,
+                               levels = c("Control", "Medium Stress", "High Stress"))
+
+group_ovlp <- read.csv(file.path(processed_data_path, "acoustic_space_density_overlap_to_group_by_week_id.csv"))
+
+
+group_ovlp$treatment <- factor(group_ovlp$treatment,
+                               levels = c("Control", "Medium Stress", "High Stress"))
+
+```
+
+# Format data
+```{r, eval = TRUE}
+
+metadat <- read_excel_df(file.path(raw_data_path, "experiment_metadata.xlsx"))
+
+sels$ID[sels$ID == "125YGMM"] <- "125YGHM"
+sels$ID[sels$ID == "394YBHM"] <- "394WBHM"
+
+
+sels$treatment <- sapply(1:nrow(sels), function(x) {
+    metadat$Treatment[metadat$Bird.ID == sels$ID[x]][1]
+    
+})
+
+
+sels$treatment.room <- sapply(1:nrow(sels), function(x) {
+    metadat$Treatment.Room[metadat$Bird.ID == sels$ID[x]][1]
+    
+})
+
+
+sels$round <- sapply(1:nrow(sels), function(x) {
+    metadat$Round[metadat$Bird.ID == sels$ID[x]][1]
+    
+})
+
+sels$source.room <- sapply(1:nrow(sels), function(x) {
+    metadat$Source.Room[metadat$Bird.ID == sels$ID[x]][1]
+    
+})
+
+sels$record.group <- sapply(1:nrow(sels), function(x) {
+    metadat$Record.Group[metadat$Bird.ID == sels$ID[x]][1]
+    
+})
+
+
+# add week
+out <- lapply(unique(sels$round), function(x) {
+    Y <- sels[sels$round == x, ]
+    
+    min_date <- min(Y$date)
+    week_limits <- min_date + seq(0, 100, by = 7)
+    
+    Y$week <- NA
+    for (i in 2:length(week_limits))
+        Y$week[Y$date >= week_limits[i - 1] & Y$date <
+                   week_limits[i]] <- i - 1
+    
+    return(Y)
+})
+
+sels <- do.call(rbind, out)
+
+
+sels$cort.baseline <- sapply(1:nrow(sels), function(x) {
+    if (sels$week[x] == 1)
+        out <- metadat$D3.CORT.Baseline[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 2)
+        out <- metadat$D7.CORT.Baseline[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 3)
+        out <- metadat$D14.CORT.Baseline[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 4)
+        out <- metadat$D21.CORT.Baseline[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 5)
+        out <- metadat$D28.CORT.Baseline[metadat$Bird.ID == sels$ID[x]][1]
+    
+    return(out)
+})
+
+
+sels$cort.stress <- sapply(1:nrow(sels), function(x) {
+    if (sels$week[x] == 1)
+        out <- metadat$D3.CORT.Stress[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 2)
+        out <- metadat$D7.CORT.Stress[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 3)
+        out <- metadat$D14.CORT.Stress[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 4)
+        out <- metadat$D21.CORT.Stress[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 5)
+        out <- metadat$D28.CORT.Stress[metadat$Bird.ID == sels$ID[x]][1]
+    
+    return(out)
+})
+
+sels$stress.response <- sels$cort.stress #- sels$cort.baseline
+
+sels$weight <- sapply(1:nrow(sels), function(x) {
+    if (sels$week[x] == 1)
+        out <- metadat$D3.Bird.Weight..g.[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 2)
+        out <- metadat$D7.Bird.Weight..g.[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 3)
+        out <- metadat$D14.Bird.Weight..g.[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 4)
+        out <- metadat$D21.Bird.Weight..g.[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 5)
+        out <- metadat$D28.Bird.Weight..g.[metadat$Bird.ID == sels$ID[x]][1]
+    
+    return(out)
+})
+
+
+sels$breath.count <- sapply(1:nrow(sels), function(x) {
+    if (sels$week[x] == 1)
+        out <- metadat$D3.Breath.Count[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 2)
+        out <- metadat$D7.Breath.Count[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 3)
+        out <- metadat$D14.Bird.Weight..g.[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 4)
+        out <- metadat$D21.Bird.Weight..g.[metadat$Bird.ID == sels$ID[x]][1]
+    
+    if (sels$week[x] == 5)
+        out <- metadat$D28.Bird.Weight..g.[metadat$Bird.ID == sels$ID[x]][1]
+    
+    return(out)
+})
+
+
+# remove week 5
+sels <- sels[sels$week != 5, ]
+
+foxp2 <- read.csv(file.path(raw_data_path, "foxp2_levels.csv"))
+
+foxp2$Treatment[grep("HIGH", foxp2$Treatment)] <- "High stress"
+foxp2$Treatment[grep("Control", foxp2$Treatment, ignore.case = T)] <- "Control"
+foxp2$Treatment[grep("MED", foxp2$Treatment)] <- "Medium stress"
+
+foxp2$Treatment <- factor(foxp2$Treatment,
+                          levels = c("Control", "Medium stress", "High stress"))
+
+```
+
+```{r prepare data for stats, eval = TRUE}
+
+agg_dat <- aggregate(selec ~ ID + week, data = sels, length)
+
+# without comparing to week 1
+agg_dat$call.count <- sapply(1:nrow(agg_dat), function(x)
+    agg_dat$selec[x])
+
+agg_dat$selec <- NULL
+
+agg_dat$baseline.CORT <- sapply(1:nrow(agg_dat), function(x) {
+    baseline <- sels$cort.baseline[sels$week == 1 &
+                                       sels$ID == agg_dat$ID[x]]
+    current <- sels$cort.baseline[sels$week == agg_dat$week[x] &
+                                      sels$ID == agg_dat$ID[x]]
+    
+    if (length(baseline) > 0 & length(current) > 0)
+        change <- mean(current) - mean(baseline) else
+        change <- NA
+    
+    return(change)
+})
+
+agg_dat$stress.response <- sapply(1:nrow(agg_dat), function(x) {
+    baseline <- sels$stress.response[sels$week == 1 &
+                                         sels$ID == agg_dat$ID[x]]
+    current <- sels$stress.response[sels$week == agg_dat$week[x] &
+                                        sels$ID == agg_dat$ID[x]]
+    
+    if (length(baseline) > 0 & length(current) > 0)
+        change <- mean(current) - mean(baseline) else
+        change <- NA
+    
+    return(change)
+})
+
+
+agg_dat$stress.CORT <- sapply(1:nrow(agg_dat), function(x) {
+    baseline <- sels$cort.stress[sels$week == 1 &
+                                     sels$ID == agg_dat$ID[x]]
+    current <- sels$cort.stress[sels$week == agg_dat$week[x] &
+                                    sels$ID == agg_dat$ID[x]]
+    
+    if (length(baseline) > 0 & length(current) > 0)
+        change <- mean(current) - mean(baseline) else
+        change <- NA
+    
+    return(change)
+})
+
+agg_dat$weight <- sapply(1:nrow(agg_dat), function(x) {
+    baseline <- sels$weight[sels$week == 1 & sels$ID == agg_dat$ID[x]]
+    current <- sels$weight[sels$week == agg_dat$week[x] &
+                               sels$ID == agg_dat$ID[x]]
+    
+    if (length(baseline) > 0 & length(current) > 0)
+        change <- mean(current) - mean(baseline) else
+        change <- NA
+    
+    return(change)
+})
+
+agg_dat$breath.rate <- sapply(1:nrow(agg_dat), function(x) {
+    baseline <- sels$breath.count[sels$week == 1 &
+                                      sels$ID == agg_dat$ID[x]]
+    current <- sels$breath.count[sels$week == agg_dat$week[x] &
+                                     sels$ID == agg_dat$ID[x]]
+    
+    if (length(baseline) > 0 & length(current) > 0)
+        change <- mean(current) - mean(baseline) else
+        change <- NA
+    
+    return(change)
+})
+
+agg_dat$acoustic.diversity <- sapply(1:nrow(agg_dat), function(x) {
+    area <- areas_by_week$raref.area[areas_by_week$ID == agg_dat$ID[x] &
+                                         areas_by_week$week ==
+                                         agg_dat$week[x]]
+    
+    if (length(area) < 1)
+        area <- NA
+    
+    return(area)
+})
+
+agg_dat$acoustic.distance <- sapply(1:nrow(agg_dat), function(x) {
+    distance <- indiv_ovlp$distance.to.first.week[indiv_ovlp$ID == agg_dat$ID[x] &
+                                                      indiv_ovlp$week == agg_dat$week[x]]
+    
+    if (length(distance) < 1)
+        distance <- NA
+    
+    return(distance)
+})
+
+agg_dat$acustic.plasticity <- sapply(1:nrow(agg_dat), function(x) {
+    overlap <- indiv_ovlp$overlap.to.first.week[indiv_ovlp$ID == agg_dat$ID[x] &
+                                                    indiv_ovlp$week == agg_dat$week[x]]
+    
+    plasticity <- 1 - overlap
+    
+    if (length(plasticity) < 1)
+        plasticity <- NA
+    
+    return(plasticity)
+})
+
+agg_dat$acoustic.convergence <- sapply(1:nrow(agg_dat), function(x) {
+    overlap <- group_ovlp$overlap.to.group[group_ovlp$ID == agg_dat$ID[x] &
+                                               group_ovlp$week ==
+                                               agg_dat$week[x]]
+    
+    if (length(overlap) < 1)
+        overlap <- NA
+    
+    return(overlap)
+})
+
+
+agg_dat$treatment <- sapply(1:nrow(agg_dat), function(x)
+    unique(sels$treatment[sels$ID ==
+                              agg_dat$ID[x]]))
+
+agg_dat$round <- sapply(1:nrow(agg_dat), function(x)
+    unique(sels$round[sels$ID ==
+                          agg_dat$ID[x]]))
+
+
+agg_dat$foxp2 <- sapply(1:nrow(agg_dat), function(x) {
+    if (agg_dat$week[x] == 4)
+        fp2 <- foxp2$FoxP2.Counts.MMSt.Striatum[foxp2$Bird.ID == agg_dat$ID[x]][1] else
+        fp2 <- NA
+    # print(length(fp2))
+    if (length(fp2) == 0)
+        fp2 <- NA
+    return(fp2)
+})
+```
+
+# Physiological parameters
+
+## Stats
+
+Models: Predicted physio measure ~ treatment + week (continuous) + IndRandom
+
+Variables (Difference from Week 1): weight, BR, baseline CORT, Stress CORT, Stress Response 
+
+```{r, eval = FALSE}
+
+responses <- c("baseline.CORT",
+               "stress.response",
+               "stress.CORT",
+               "weight",
+               "breath.rate")
+
+predictors <- c("~ treatment + week + (1|ID) + (1|round)")
+
+formulas <- expand.grid(
+    responses = responses,
+    predictors = predictors,
+    stringsAsFactors = FALSE
+)
+
+vars_to_scale <- c(responses, "week")
+
+# remove week 1
+sub_agg_dat <- agg_dat[agg_dat$week != 1, ]
+
+for (i in vars_to_scale)
+    sub_agg_dat[, vars_to_scale] <- scale(sub_agg_dat[, vars_to_scale])
+
+physio_models <- lapply(1:nrow(formulas), function(x) {
+    sub_dat <- sub_agg_dat[!is.na(sub_agg_dat[names(sub_agg_dat) == formulas$responses[x]]), ]
+    sub_dat
+    # replace ~ by "by" in the formula
+    mod_name <- paste(formulas$responses[x],
+                      gsub("~", "by", formulas$predictors[x]))
+    
+    mod <- brm(
+        formula = paste(formulas$responses[x], formulas$predictors[x]),
+        iter = 100000,
+        silent = 2,
+        family =  student(),
+        data = sub_dat,
+        control = list(adapt_delta = 0.9, max_treedepth = 15),
+        chains = 4,
+        cores = 4,
+        file = paste0(
+            file.path(processed_data_path,"physio-"),
+            mod_name
+        ),
+        file_refit = "always",
+        prior = c(
+            prior(normal(0, 5), "b"),
+            prior(normal(0, 10), "Intercept"),
+            prior(student_t(3, 0, 10), "sd"),
+            prior(student_t(3, 0, 10), "sigma")
+        )
+    )
+    
+    return(mod)
+})
+
+
+```
+
+```{r, results = 'asis'}
+
+physio_models <- list.files(
+    file.path(processed_data_path, "regressions"),
+    pattern = "physio-",
+    full.names = TRUE
+)
+
+for (x in 1:length(physio_models))
+    extended_summary(
+        read.file = physio_models[x],
+        gsub.pattern = "b_treatment|b_",
+        gsub.replacement = "",
+        highlight = TRUE,
+        remove.intercepts = TRUE
+    )
+
+```
+
+Barplot and effect sizes graphs
+```{r, eval = TRUE, out.width="120%", out.height="200%"}
+
+
+physio_model_list <- list.files(
+    file.path(processed_data_path, "regressions"),
+    pattern = "physio-",
+    full.names = TRUE
+)
+
+# read all physio models
+physio_models <- lapply(physio_model_list, readRDS)
+names(physio_models) <- gsub(".rds", "", basename(physio_model_list))
+
+breath.count <- stack(metadat[, c(
+    "D3.Breath.Count",
+    "D7.Breath.Count",
+    "D14.Breath.Count",
+    "D21.Breath.Count",
+    "D28.Breath.Count"
+)])
+
+weight <- stack(metadat[, c(
+    "D3.Bird.Weight..g.",
+    "D7.Bird.Weight..g.",
+    "D14.Bird.Weight..g.",
+    "D21.Bird.Weight..g.",
+    "D28.Bird.Weight..g."
+)])
+
+cort.stress <- stack(metadat[, c(
+    "D3.CORT.Stress",
+    "D7.CORT.Stress",
+    "D14.CORT.Stress",
+    "D21.CORT.Stress",
+    "D28.CORT.Stress"
+)])
+
+cort.baseline <- stack(metadat[, c(
+    "D3.CORT.Baseline",
+    "D7.CORT.Baseline",
+    "D14.CORT.Baseline",
+    "D21.CORT.Baseline",
+    "D28.CORT.Baseline"
+)])
+
+
+stress <- data.frame(
+    metadat[, c("Bird.ID", "Treatment", "Round", "Treatment.Room")],
+    week = breath.count$ind,
+    breath.count = breath.count$values,
+    weight = weight$values,
+    cort.stress = cort.stress$values,
+    cort.baseline = cort.baseline$values,
+    stress.response = cort.stress$values -
+        cort.baseline$values
+)
+
+# head(stress)
+
+stress$week <- factor(sapply(strsplit(as.character(stress$week), "\\."), "[[", 1),
+                      levels = c("D3", "D7", "D14", "D21", "D28"))
+
+stress$day <- as.numeric(gsub("D", "", as.character(stress$week)))
+stress$round <- paste("Round", stress$Round)
+
+stress$Treatment <- gsub("Medium", "Med.", stress$Treatment)
+
+stress$treatment <- factor(stress$Treatment,
+                           levels = c("Control", "Med. Stress", "High Stress"))
+
+# remove 5th week
+stress <- stress[stress$week != "D28", ]
+
+
+stress_l <- lapply(stress$Bird.ID, function(x) {
+    X <- stress[stress$Bird.ID == x, ]
+    
+    X$breath.count <- X$breath.count - X$breath.count[X$week == "D3"]
+    X$weight <- X$weight - X$weight[X$week == "D3"]
+    X$cort.stress <- X$cort.stress - X$cort.stress[X$week == "D3"]
+    X$cort.baseline <- X$cort.baseline - X$cort.baseline[X$week == "D3"]
+    X$stress.response <- X$stress.response - X$stress.response[X$week == "D3"]
+    
+    return(X)
+})
+
+stress <- do.call(rbind, stress_l)
+
+agg_stress <- aggregate(
+    cbind(breath.count, weight, stress.response, cort.baseline) ~ week + treatment,
+    stress,
+    mean
+)
+agg_stress_se <- aggregate(
+    cbind(breath.count, weight, stress.response, cort.baseline) ~ week + treatment,
+    stress,
+    standard_error
+)
+
+names(agg_stress_se) <- paste(names(agg_stress_se), ".se", sep = "")
+
+agg_stress <- cbind(agg_stress, agg_stress_se[, 3:6])
+
+agg_stress$Week <- 1:4
+
+
+bs <- if (isTRUE(getOption('knitr.in.progress')))
+    10 else
+    20
+
+gg_breath.count <- ggplot(data = agg_stress, aes(x = Week, y = breath.count, fill = treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(
+        aes(
+            ymin = breath.count - breath.count.se,
+            ymax = breath.count + breath.count.se
+        ),
+        width = 0.1
+    ) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    facet_wrap( ~ treatment, ncol = 3, scale = "fixed") +
+    labs(y = "Mean change in breath\nrate (breaths/min)", x = "Week") +
+    theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+gg_weight <- ggplot(data = agg_stress, aes(x = Week, y = weight, fill = treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(aes(ymin = weight - weight.se, ymax = weight + weight.se), width = 0.1) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    facet_wrap( ~ treatment, ncol = 3, scale = "fixed") +
+    labs(y = "Mean change in \nweight (grams)", x = "Week") +
+    theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+
+gg_cort.baseline <- ggplot(data = agg_stress, aes(x = Week, y = cort.baseline, fill = treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(
+        aes(
+            ymin = cort.baseline - cort.baseline.se,
+            ymax = cort.baseline + cort.baseline.se
+        ),
+        width = 0.1
+    ) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    facet_wrap( ~ treatment, ncol = 3, scale = "fixed") +
+    labs(y = "Mean change in\nbaseline CORT (ng/mL)", x = "Week") +
+    theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+
+gg_stress.response <- ggplot(data = agg_stress, aes(x = Week, y = stress.response, fill = treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(
+        aes(
+            ymin = stress.response - stress.response.se,
+            ymax = stress.response + stress.response.se
+        ),
+        width = 0.1
+    ) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    facet_wrap( ~ treatment, ncol = 3, scale = "fixed") +
+    labs(y = "Mean change in stress\nresponse CORT (ng/mL)", x = "Week") +
+    theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+
+gg_coeffs_physio <- lapply(physio_models, function(x) {
+    vars <- grep("b_", posterior::variables(x), value = TRUE)
+    draws <- posterior::as_draws_array(x, variable = vars)
+    
+    coef_table <- brmsish:::draw_summary(
+        draws,
+        variables = vars,
+        probs = c(0.025, 0.975),
+        robust = TRUE,
+        spread.type = "HPDI"
+    )
+    
+    coef_table$predictor <- rownames(coef_table)
+    coef_table$predictor <- gsub("b_treatment|b_", "", coef_table$predictor)
+    coef_table$predictor <- gsub("Stress", " stress", coef_table$predictor)
+    coef_table$predictor <- gsub("week", "Week", coef_table$predictor)
+    coef_table <- coef_table[coef_table$predictor != "Intercept", ]
+    
+    gg_coef <- ggplot2::ggplot(data = coef_table, aes(x = Estimate, y = predictor)) +
+        geom_vline(xintercept = 0, lty = 2) +
+        ggplot2::geom_point(size = 3, col = col_pointrange) +
+        ggplot2::geom_errorbar(
+            ggplot2::aes(xmin = `l-95% CI`, xmax = `u-95% CI`),
+            width = 0,
+            col = col_pointrange
+        ) +
+        ggplot2::theme_classic(base_size = bs) +
+        ggplot2::theme(
+            axis.ticks.length = ggplot2::unit(0, "pt"),
+            plot.margin = ggplot2::margin(0, 0, 0, 0, "pt"),
+            legend.position = "none",
+            strip.background = ggplot2::element_blank(),
+            strip.text = ggplot2::element_blank()
+        ) +
+        ggplot2::labs(x = "Effect size", y = "")
+    
+    return(gg_coef)
+})
+
+cowplot::plot_grid(
+    gg_breath.count,
+    gg_weight,
+    gg_cort.baseline,
+    gg_stress.response,
+    gg_coeffs_physio[[grep("breath", names(gg_coeffs_physio))]] + theme_classic(base_size = bs),
+    gg_coeffs_physio[[grep("weight", names(gg_coeffs_physio))]] + theme_classic(base_size = bs),
+    gg_coeffs_physio[[grep("baseline", names(gg_coeffs_physio))]] + theme_classic(base_size = bs),
+    gg_coeffs_physio[[grep("response", names(gg_coeffs_physio))]] + theme_classic(base_size = bs),
+    nrow = 2,
+    rel_heights = c(1.8, 1)
+)
+
+# try bs = 20 for saving plots
+if (!isTRUE(getOption('knitr.in.progress'))) {
+    cowplot::ggsave2(
+        filename = file.path(output_path, "bar_graphs_and_estimates_physiology_70dpi.jpeg"),
+        width = 23,
+        height = 9,
+        device = grDevices::png
+    )
+    
+    cowplot::ggsave2(
+        filename = file.path(output_path, "bar_graphs_and_estimates_physiology_300dpi.jpeg"),
+        dpi = 300,
+        width = 23,
+        height = 9,
+        device = grDevices::png
+    )
+}
+
+```
+
+
+
+<div class="alert alert-info">
+
+## Takeaways
+
+-  Breath rate decreases gradually across time after the first week
+
+-  Stress response is higher in "high stress" birds compared to first week
+
+</div>
+
+&nbsp;
+
+# Acoustic space projection
+
+t-SNE
+
+```{r tsne plot 2, eval = TRUE, fig.width= 8, fig.height= 8}
+
+tsne_acou_space <- read.csv(file.path(processed_data_path, "tsne_acoustic_space.csv"))
+
+ids <- c("371YYLM", "395WBHM")
+
+mat <- matrix(c(11:14, 1:4, 5:8, 22, 9, 9, 18),
+              ncol = 4,
+              byrow = TRUE)
+
+mat <- cbind(c(23, 10, 10, 20), mat, c(21, 15, 16, 19))
+
+mat <- rbind(rep(17, 6), mat)
+
+
+if (!isTRUE(getOption('knitr.in.progress')))
+    jpeg(
+        file.path(output_path, "acoustic_space_plot.jpg"),
+        width = 1800,
+        height = 2200,
+        res = 300
+    )
+
+layout(mat,
+       widths = c(0.4, 1, 1, 1, 1, 0.2),
+       heights = c(4, 0.2, 1, 1, 0.4))
+
+par(mar = c(0, 0, 0, 0))
+panel_count <- 1
+
+colors <- viridis(3, alpha = 0.8)
+
+for (x in ids)
+    for (i in 1:4) {
+        plot_space(
+            X = tsne_acou_space,
+            dimensions = c("TSNE1", "TSNE2"),
+            indices = which(tsne_acou_space$ID == x &
+                                tsne_acou_space$week == i),
+            basecex = 2,
+            pch = 20,
+            labels = c(x, "group"),
+            legend = NULL,
+            xaxt = if (panel_count %in% mat[4, ])
+                "s" else
+                "n",
+            yaxt = "n",
+            colors = colors[1:2],
+            point.cex = 1.7,
+            point.alpha = 0.3,
+            point.colors = c("black", "black")
+        )
+        
+        # add y axis removing the upper tick label
+        if (panel_count %in% mat[, 2])
+            axis(
+                2,
+                at = seq(-60, 60, 20),
+                labels = c(seq(-60, 40, 20), ""),
+                tck = -0.02,
+                lwd = 0.5,
+                col = "black",
+                col.axis = "black"
+            )
+        
+        panel_count <- panel_count + 1
+    }
+
+par(mar = c(0, 0, 0, 0))
+
+plot(
+    1,
+    frame.plot = FALSE,
+    type = "n",
+    yaxt = "n",
+    xaxt = "n"
+)
+
+text(x = 1, y = 0.75, "TSNE1", cex = 1.2)
+
+par(mar = c(0, 0, 0, 0))
+
+plot(
+    1,
+    frame.plot = FALSE,
+    type = "n",
+    yaxt = "n",
+    xaxt = "n"
+)
+
+text(
+    x = 0.8,
+    y = 1,
+    "TSNE2",
+    srt = 90,
+    cex = 1.2
+)
+
+for (u in paste("Week", 1:4))  {
+    par(mar = c(0, 0, 0, 0))
+    
+    plot(
+        1,
+        frame.plot = FALSE,
+        type = "n",
+        yaxt = "n",
+        xaxt = "n"
+    )
+    
+    if (u == "Week 1") {
+        mtext(
+            "b",
+            side = 2,
+            line = 2.2,
+            at = 1,
+            las = 1,
+            cex = 1.5
+        )
+    }
+    
+    rect(0, 0, 2, 2, col = colors[2], border = NA)
+    
+    
+    box()
+    text(x = 1, y = 1, u, cex = 1.2)
+}
+
+for (u in ids) {
+    par(mar = c(0, 0, 0, 0))
+    
+    plot(
+        1,
+        frame.plot = FALSE,
+        type = "n",
+        yaxt = "n",
+        xaxt = "n"
+    )
+    rect(0, 0, 2, 2, col = colors[2], border = NA)
+    
+    box()
+    
+    text(
+        x = 1,
+        y = 1,
+        u,
+        srt = 270,
+        cex = 1.2
+    )
+}
+
+# set par to default
+par(mar = c(2, 4, 1, 2) + 0.1)
+
+# make scatter plot like gg_acou_space using base R plotting functions
+plot(
+    tsne_acou_space$TSNE1,
+    tsne_acou_space$TSNE2,
+    col = "white",
+    pch = 20,
+    cex = 1.2,
+    xlab = "",
+    ylab = "TSNE2",
+    cex.lab = 1.2
+)
+
+# add legend with no margin color
+legend(
+    x = -75,
+    y = -25,
+    legend = c("Control", "Medium Stress", "High Stress"),
+    col = viridis::viridis(3, alpha = 0.3, direction = 1),
+    pch = 20,
+    box.lwd = 0,
+    pt.cex = 1.8,
+    cex = 1.2
+)
+
+points(
+    tsne_acou_space$TSNE1,
+    tsne_acou_space$TSNE2,
+    col = viridis::viridis(3, alpha = 0.3, direction = 1)[as.numeric(as.factor(tsne_acou_space$treatment))],
+    pch = 20,
+    cex = 1.2
+)
+
+mtext(
+    "a",
+    side = 2,
+    line = 2.7,
+    at = 65,
+    las = 1,
+    cex = 1.5
+)
+
+if (!isTRUE(getOption('knitr.in.progress')))
+    dev.off()
+
+```
+
+## Overlap between treatments 
+```{r}
+
+ss <- space_similarity(treatment ~ TSNE1 + TSNE2, data = tsne_acou_space, method = "density.overlap")
+
+print_kable(ss)
+
+
+```
+
+- Mean overlap: `r mean(ss$mean.overlap)`
+
+- Range of overlap: `r min(ss$mean.overlap)` to `r max(ss$mean.overlap)`
+
+
+## Stats
+
+Model: Predicted behavior ~ treatment + week (continuous) + IndRandom
+
+Variables: # calls, Distance moved from self in first week, Overlap to original acoustic space, Match to group repertoire, Maybe overall size of acoustic space
+
+Do as comparison to week one using rarefacted calls and kernel density
+
+
+```{r, eval = FALSE}
+
+
+responses <- c("call.count",
+               "acoustic.diversity",
+               "acustic.plasticity",
+               "acoustic.convergence")
+
+predictors <- c("~ treatment + week + (1|ID) + (1|round)")
+
+formulas <- expand.grid(
+    responses = responses,
+    predictors = predictors,
+    stringsAsFactors = FALSE
+)
+
+# vars_to_scale <- c(responses, "week")
+
+
+# for (i in vars_to_scale) agg_dat[, vars_to_scale] <- scale(agg_dat[, vars_to_scale])
+
+behav_models <- lapply(1:nrow(formulas), function(x) {
+    sub_dat <- agg_dat[!is.na(agg_dat[names(agg_dat) == formulas$responses[x]]), ]
+    
+    # remove week 1
+    if (!grepl("count|group", formulas$responses[x]))
+        sub_dat <- sub_dat[sub_dat$week != 1, ]
+    
+    mod_name <- paste(formulas$responses[x],
+                      gsub("~", "by", formulas$predictors[x]))
+    
+    
+    mod <- brm(
+        formula = paste(formulas$responses[x], formulas$predictors[x]),
+        iter = 100000,
+        family = if (formulas$responses[x] == "call.count")
+            negbinomial() else
+            Beta(link = "logit"),
+        silent = 2,
+        data = sub_dat,
+        control = list(adapt_delta = 0.9, max_treedepth = 15),
+        chains = 4,
+        cores = 4,
+        file = paste0(processed_data_path, "regressions/behav-", mod_name),
+        file_refit = "always",
+        prior = c(prior(normal(0, 5), "b"), prior(normal(0, 10), "Intercept") #,
+                  # prior(student_t(3, 0, 10), "sd"),
+                  # prior(student_t(3, 0, 10), "sigma"))
+        )
+        
+        return(NULL)
+})
+    
+
+```
+
+```{r, results = 'asis'}
+
+
+behav_models <- list.files(
+    file.path(processed_data_path, "regressions"),
+    pattern = "behav-",
+    full.names = TRUE
+)
+
+for (x in 1:length(behav_models))
+    extended_summary(
+        read.file = behav_models[x],
+        gsub.pattern = "b_treatment|b_",
+        gsub.replacement = "",
+        highlight = TRUE,
+        remove.intercepts = TRUE
+    )
+
+```
+
+Barplot and effect sizes graph
+```{r, eval = TRUE, out.width="120%", out.height="200%"}
+
+behav_model_list <- list.files(
+    file.path(processed_data_path, "regressions"),
+    pattern = "behav-",
+    full.names = TRUE
+)
+
+# read all physio models
+behav_models <- lapply(behav_model_list, readRDS)
+names(behav_models) <- gsub(".rds", "", basename(behav_model_list))
+
+
+agg_call.count <- aggregate(cbind(call.count, acoustic.convergence) ~ week + treatment,
+                            agg_dat,
+                            mean)
+
+agg_behav <- aggregate(cbind(acoustic.diversity, acustic.plasticity) ~ week + treatment,
+                       agg_dat,
+                       mean)
+
+agg_call.count_se <- aggregate(cbind(call.count, acoustic.convergence) ~ week + treatment,
+                               agg_dat,
+                               standard_error)
+
+agg_behav_se <- aggregate(
+    cbind(acoustic.diversity, acustic.plasticity) ~ week + treatment,
+    agg_dat,
+    standard_error
+)
+
+agg_behav_se <- merge(agg_call.count_se, agg_behav_se, all = TRUE)
+
+names(agg_behav_se) <- paste(names(agg_behav_se), ".se", sep = "")
+
+agg_behav <- merge(agg_call.count, agg_behav, all = TRUE)
+
+agg_behav <- cbind(agg_behav, agg_behav_se[, 3:6])
+
+bs <- if (isTRUE(getOption('knitr.in.progress')))
+    10 else 20
+
+agg_behav$treatment <- gsub("Medium", "Med.", agg_behav$treatment)
+
+agg_behav$treatment <- factor(agg_behav$treatment,
+                              levels = c("Control", "Med. Stress", "High Stress"))
+
+
+gg_call.count <- ggplot(data = agg_behav, aes(x = week, y = call.count, fill = treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(aes(
+        ymin = call.count - call.count.se,
+        ymax = call.count + call.count.se
+    ),
+    width = 0.1) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    facet_wrap( ~ treatment, ncol = 3, scale = "fixed") +
+    labs(y = "Vocal output", x = "Week") +
+    theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+gg_acoustic.diversity <- ggplot(data = agg_behav, aes(x = week, y = acoustic.diversity, fill = treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(
+        aes(
+            ymin = acoustic.diversity - acoustic.diversity.se,
+            ymax = acoustic.diversity + acoustic.diversity.se
+        ),
+        width = 0.1
+    ) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    facet_wrap( ~ treatment, ncol = 3, scale = "fixed") +
+    labs(y = "Change in vocal diversity", x = "Week") +
+    theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+gg_acustic.plasticity <- ggplot(data = agg_behav, aes(x = week, y = acustic.plasticity, fill = treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(
+        aes(
+            ymin = acustic.plasticity - acustic.plasticity.se,
+            ymax = acustic.plasticity + acustic.plasticity.se
+        ),
+        width = 0.1
+    ) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    facet_wrap( ~ treatment, ncol = 3, scale = "fixed") +
+    labs(y = "Vocal plasticity", x = "Week") +
+    theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+gg_acoustic.convergence <- ggplot(data = agg_behav, aes(x = week, y = acoustic.convergence, fill = treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(
+        aes(
+            ymin = acoustic.convergence - acoustic.convergence.se,
+            ymax = acoustic.convergence + acoustic.convergence.se
+        ),
+        width = 0.1
+    ) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    facet_wrap( ~ treatment, ncol = 3, scale = "fixed") +
+    labs(y = "Vocal convergence", x = "Week") +
+    theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+gg_coeffs_behav <- lapply(behav_models, function(x) {
+    vars <- grep("b_", posterior::variables(x), value = TRUE)
+    draws <- posterior::as_draws_array(x, variable = vars)
+    
+    coef_table <- brmsish:::draw_summary(
+        draws,
+        variables = vars,
+        probs = c(0.025, 0.975),
+        robust = TRUE,
+        spread.type = "HPDI"
+    )
+    
+    coef_table$predictor <- rownames(coef_table)
+    coef_table$predictor <- gsub("b_treatment|b_", "", coef_table$predictor)
+    coef_table$predictor <- gsub("Stress", " stress", coef_table$predictor)
+    coef_table$predictor <- gsub("week", "Week", coef_table$predictor)
+    coef_table <- coef_table[coef_table$predictor != "Intercept", ]
+    
+    gg_coef <- ggplot2::ggplot(data = coef_table, aes(x = Estimate, y = predictor)) +
+        geom_vline(xintercept = 0, lty = 2) +
+        ggplot2::geom_point(size = 4, col = col_pointrange) +
+        ggplot2::geom_errorbar(
+            ggplot2::aes(xmin = `l-95% CI`, xmax = `u-95% CI`),
+            width = 0,
+            col = col_pointrange
+        ) +
+        ggplot2::theme_classic(base_size = bs) +
+        ggplot2::theme(
+            axis.ticks.length = ggplot2::unit(0, "pt"),
+            plot.margin = ggplot2::margin(0, 0, 0, 0, "pt"),
+            legend.position = "none",
+            strip.background = ggplot2::element_blank(),
+            strip.text = ggplot2::element_blank()
+        ) +
+        ggplot2::labs(x = "Effect size", y = "")
+    
+    return(gg_coef)
+})
+
+cowplot::plot_grid(
+    gg_call.count,
+    gg_acoustic.diversity,
+    gg_acustic.plasticity,
+    gg_acoustic.convergence,
+    gg_coeffs_behav[[grep("count", names(gg_coeffs_behav))]] + theme_classic(base_size = bs),
+    gg_coeffs_behav[[grep("diversity", names(gg_coeffs_behav))]] + theme_classic(base_size = bs),
+    gg_coeffs_behav[[grep("plasticity", names(gg_coeffs_behav))]] + theme_classic(base_size = bs),
+    gg_coeffs_behav[[grep("convergence", names(gg_coeffs_behav))]] + theme_classic(base_size = bs),
+    nrow = 2,
+    rel_heights = c(1.8, 1)
+)
+
+# try bs = 20 for saving plots
+
+if (!isTRUE(getOption('knitr.in.progress'))) {
+    cowplot::ggsave2(
+        filename = file.path(output_path, "bar_graphs_and_estimates_behavior_70dpi.jpeg"),
+        width = 23,
+        height = 9,
+        device = grDevices::png
+    )
+    #
+    cowplot::ggsave2(
+        filename = file.path(output_path,"bar_graphs_and_estimates_behavior_300dpi.jpeg"),
+        dpi = 300,
+        width = 23,
+        height = 9,
+        device = grDevices::png
+    )
+}
+```
+
+<div class="alert alert-info">
+
+## Takeaways
+
+-  Lower vocal output over time
+
+-  Higher vocal output in "high stress" birds compared to control
+
+-  Lower acoustic plasticity to themselves in week 1 for "high stress" birds compared to control
+
+-  Increase in acoustic plasticity over time 
+
+
+
+</div>
+
+&nbsp;
+
+
+
+# FOXP2
+
+## FoxP2 positive cells in MMST:VSP
+
+### Stats
+
+```{r, eval = FALSE}
+foxp2_mod <- brm(
+    formula = FoxP2.Counts.MMSt.Striatum ~ Treatment,
+    iter = 100000,
+    family = Gamma(link = "log"),
+    silent = 2,
+    data = foxp2,
+    control = list(adapt_delta = 0.9, max_treedepth = 15),
+    chains = 4,
+    cores = 4,
+    file = file.path(processed_data_path, "regressions/foxp2_by_treatment_model"),
+    file_refit = "on_change",
+    prior = c(prior(normal(0, 5), "b"), prior(normal(0, 10), "Intercept"))
+)
+```
+
+
+```{r, eval = TRUE, results='asis'}
+
+extended_summary(
+    read.file =  file.path(processed_data_path, "regressions/foxp2_by_treatment_model.rds"),
+    gsub.pattern = "b_treatment|b_",
+    gsub.replacement = "",
+    highlight = TRUE,
+    remove.intercepts = TRUE
+)
+
+```
+
+
+## FoxP2 mRNA expression MMST:VSP
+
+```{r, eval = TRUE}
+
+qpcr <- read.csv(file.path(raw_data_path, "qpcr_foxp2_expression.csv"))
+
+```
+
+### Stats
+
+```{r, eval = FALSE}
+mod <- brm(
+    formula = FoxP2.mRNA.MMST.VSP ~ Treatment,
+    iter = 100000,
+    family = Gamma(link = "log"),
+    silent = 2,
+    data = qpcr,
+    control = list(adapt_delta = 0.9, max_treedepth = 15),
+    chains = 4,
+    cores = 4,
+    file =  file.path(processed_data_path, "regressions/qpcr_by_treatment_model"),
+    file_refit = "on_change",
+    prior = c(prior(normal(0, 5), "b"), prior(normal(0, 10), "Intercept"))
+)
+
+```
+
+
+```{r, eval = TRUE, results='asis'}
+
+extended_summary(
+    read.file =  file.path(processed_data_path,  "regressions/qpcr_by_treatment_model.rds"),
+    gsub.pattern = "b_treatment|b_",
+    gsub.replacement = "",
+    highlight = TRUE,
+    remove.intercepts = TRUE
+)
+   
+```
+
+Barplot and effect sizes graph
+```{r, eval = TRUE, out.width="120%", out.height="200%"}
+
+
+agg_foxp2 <- aggregate(FoxP2.Counts.MMSt.Striatum ~ Treatment, foxp2, mean)
+
+agg_foxp2$se <- aggregate(FoxP2.Counts.MMSt.Striatum ~ Treatment, foxp2, standard_error)$FoxP2.Counts.MMSt.Striatum
+
+
+gg_foxp2 <- ggplot(data = agg_foxp2,
+                   aes(x = Treatment, y = FoxP2.Counts.MMSt.Striatum, fill = Treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(
+        aes(ymin = FoxP2.Counts.MMSt.Striatum - se, ymax = FoxP2.Counts.MMSt.Striatum + se),
+        width = 0.1
+    ) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    scale_x_discrete(
+        labels = c(
+            "Control" = "Control",
+            "Medium stress" = "Medium\nstress",
+            "High stress" = "High\nstress"
+        )
+    ) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    labs(y = "FoxP2 positive\ncells in MMST:VSP", x = "Treatment") + theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+agg_mrna <- aggregate(FoxP2.mRNA.MMST.VSP ~ Treatment, qpcr, mean)
+
+agg_mrna$se <- aggregate(FoxP2.mRNA.MMST.VSP ~ Treatment, qpcr, standard_error)$FoxP2.mRNA.MMST.VSP
+
+# order levels
+agg_foxp2$Treatment <- factor(agg_foxp2$Treatment,
+                              levels = c("Control", "Medium stress", "High stress"))
+agg_mrna$Treatment <- factor(agg_mrna$Treatment,
+                             levels = c("Control", "Medium", "High Stress"))
+
+
+gg_qpcr <- ggplot(data = agg_mrna,
+                  aes(x = Treatment, y = FoxP2.mRNA.MMST.VSP, fill = Treatment)) +
+    geom_bar(stat = "identity") +
+    geom_errorbar(aes(ymin = FoxP2.mRNA.MMST.VSP - se, ymax = FoxP2.mRNA.MMST.VSP + se),
+                  width = 0.1) +
+    scale_x_discrete(
+        labels = c(
+            "Control" = "Control",
+            "Medium" = "Medium\nstress",
+            "High Stress" = "High\nstress"
+        )
+    ) +
+    scale_fill_viridis_d(begin = 0.1, end = 0.9) +
+    labs(y = "FoxP2 mRNA\nexpression MMST:VSP", x = "Treatment") + theme_classic(base_size = bs) +
+    theme(legend.position = "none")
+
+
+foxp2_cells_mod <- readRDS( file.path(processed_data_path, "regressions/foxp2_by_treatment_model.rds"))
+qpcr_mod <- readRDS(file.path(processed_data_path, "regressions/qpcr_by_treatment_model.rds"))
+
+gg_coeffs_foxp2 <- lapply(list(foxp2_cells_mod, qpcr_mod), function(x) {
+    vars <- grep("b_", posterior::variables(x), value = TRUE)
+    draws <- posterior::as_draws_array(x, variable = vars)
+    
+    coef_table <- brmsish:::draw_summary(
+        draws,
+        variables = vars,
+        probs = c(0.025, 0.975),
+        robust = TRUE,
+        spread.type = "HPDI"
+    )
+    
+    coef_table$predictor <- rownames(coef_table)
+    coef_table$predictor <- gsub("b_treatment|b_", "", coef_table$predictor)
+    coef_table$predictor <- gsub("Stress", " stress", coef_table$predictor)
+    coef_table$predictor <- gsub("week", "Week", coef_table$predictor)
+    coef_table$predictor <- gsub("Treatment", "", coef_table$predictor)
+    coef_table$predictor <- gsub("Mediumstress|Medium",
+                                 "Medium stress",
+                                 coef_table$predictor)
+    coef_table$predictor <- gsub("Highstress", "High stress", coef_table$predictor)
+    coef_table <- coef_table[coef_table$predictor != "Intercept", ]
+    
+    gg_coef <- ggplot2::ggplot(data = coef_table, aes(x = Estimate, y = predictor)) +
+        geom_vline(xintercept = 0, lty = 2) +
+        ggplot2::geom_point(size = 4, col = col_pointrange) +
+        ggplot2::geom_errorbar(
+            ggplot2::aes(xmin = `l-95% CI`, xmax = `u-95% CI`),
+            width = 0,
+            col = col_pointrange
+        ) +
+        ggplot2::theme_classic(base_size = bs) +
+        ggplot2::theme(
+            axis.ticks.length = ggplot2::unit(0, "pt"),
+            plot.margin = ggplot2::margin(0, 0, 0, 0, "pt"),
+            legend.position = "none",
+            strip.background = ggplot2::element_blank(),
+            strip.text = ggplot2::element_blank()
+        ) +
+        ggplot2::labs(x = "Effect size", y = "")
+    
+    return(gg_coef)
+})
+
+cowplot::plot_grid(
+    gg_foxp2,
+    gg_qpcr,
+    gg_coeffs_foxp2[[1]] + theme_classic(base_size = bs),
+    gg_coeffs_foxp2[[2]] + theme_classic(base_size = bs),
+    nrow = 2,
+    rel_heights = c(1.8, 1)
+)
+
+# try bs = 20 for saving plots
+
+cowplot::ggsave2(
+    filename = file.path(output_path,"bar_graphs_and_estimates_foxp2_70dpi.jpeg"),
+    width = 15,
+    height = 10,
+    device = grDevices::png
+)
+
+cowplot::ggsave2(
+    filename = file.path(output_path,"bar_graphs_and_estimates_foxp2_300dpi.jpeg"),
+    dpi = 300,
+    width = 15,
+    height = 10,
+    device = grDevices::png
+)
+
+```
+
+
+
+# Combined model diagnostics
+
+```{r, eval = TRUE, results='asis'}
+
+check_rds_fits(path =  file.path(processed_data_path, "regressions"), html = TRUE)
+
+```
+
+---
+
+# Session information {.unnumbered .unlisted}
+
+```{r session info, echo=F, eval = TRUE}
+
+devtools::session_info()
+
+
+```

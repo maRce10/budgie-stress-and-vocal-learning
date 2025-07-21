@@ -1,0 +1,42 @@
+---
+title: "Chronic stress and vocal plasticity in male budgerigars"
+output: github_document
+editor_options:
+  chunk_output_type: console
+---
+
+<!-- Description  -->
+<div class="alert alert-info">
+Data analysis for the paper:
+
+Timothy F. Wright, Marcelo Araya-Salas, Alondra Villalba, Amelia M.-F. Clayshulte Abraham, Carlos I. Campos, Amanda L. Schmidt, Connor Draney, Jodie M. Jawor. *In review*. ***Chronic stress raises baseline circulating corticosterone and reduces vocal plasticity in male budgerigars, an avian model for adult vocal learning.***
+
+</div>
+
+*Updated on `r Sys.Date()`*
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+
+# install.packages("rmarkdown")
+library(rmarkdown)
+
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  out.width = "100%"
+)
+```
+
+
+## General info
+
+- Evaluated the physiological and behavioral response to stress related to vocal learning in budgerigars.
+
+## Status
+
+Project is: *in_progress*
+
+## Contact
+
+Created by [Marcelo Araya-Salas](marce10.github.io/)
