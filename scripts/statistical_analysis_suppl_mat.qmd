@@ -11,7 +11,7 @@ highlight-style: pygments
 format:
   html:
     df-print: kable
-    code-fold: show
+    code-fold: true
     code-tools: true
     css: qmd.css
 ---
